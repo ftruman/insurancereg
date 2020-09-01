@@ -1,0 +1,927 @@
+---
+title: <center> Predicting Medical Expenses for Insurance Companies <center>
+subtitle: <center> <h1>Stat 330 Final Project</h1> </center>
+author: <center> Foster Truman and Jeremiah Jensen <center>
+output: html_document
+---
+
+<style type="text/css">
+h1.title {
+  font-size: 40px;
+  text-align: center;
+}
+</style>
+
+```{r, include = FALSE}
+library(tidyverse)
+library(ggplot2)
+library(corrplot)
+library(bestglm) 
+library(car) 
+library(ggfortify) 
+library(glmnet)
+sz <- 15
+```
+
+# Background and Introduction
+
+When determining the amount of money an individual should pay for an insurance premium, insurance companies use the detailed medical history of an individual in order to predict how expensive said individual will be for the insurance company. Once they've predicted the expense, they can give a premium for the individual that will cover that expense and give them profit. 
+
+The following data set, titled insurance.csv, measures seven variables (age, sex, bmi, children, smoker, region, and charges) for 1338 separate people between the ages of 18-64. The individuals selected for this data set were all randomly selected. The purpose of the data set is to use the data collected on each individual (age, sex, bmi, children, smoker, and region) and apply multiple linear regression to predict the average amount of money (charges) spent on medical expenses annually for an individual given their predictors. Once predicted, insurance companies can use these predictions to set insurance premiums. The data comes from an online database at www.kaggle.com, and we downloaded the data set (a .csv file) on March 31, 2020. A description of each of the data set's seven variables is found below.
+
+Variable | Description
+-------- | -------------
+Age      | The age of the individual in years
+Sex      | The sex of the gender (male or female)
+BMI      | The BMI of the individual (in kg/m^s)
+Children | The number of children that the individual has
+Smoker   | Whether or not the individual regularly smokes (yes or no)
+Region   | The region in the United States where the individual lives (NE, NW, SE, or SW)
+Charges  | The amount of dollars the individual spent on medical expenses in the previous year
+
+Given what we know, our hypotheses are that as age, BMI, and number of children increase, so will the annual amount of money spent on medical expenses. We also predict that smokers will spend more on medical expenses than non-smokers. Because we think that there is a large variety of people in each region and that there isn't a large medical difference between sexes, we think that neither region nor sex will have a significant effect on average medical expense. Finally, we  predict that there will be an interaction between BMI and whether or not a person is a smoker, as those with a higher BMI (typically thought to be unhealthier) might face the more extreme effects of smoking than those of a lower BMI (typically considered healthier).
+
+In order to test these hypotheses, we first looked at a few plots (scatterplots, boxplots, correlation plots) to see what our data looked like and to see if we could identify any trends. We saw that the predictors that seemed to be the most significant were age, BMI, and whether or not someone smoked. Performing variable selection procedures, we were able to confirm that these were the best predictors to include in our model. We used ANOVA tests to understand if there were any interaction terms that we should incorporate into our model and saw that the interactions between smoker and BMI and age and BMI were indeed significant. Once we created our model, we saw that the model didn't necessarily meet the assumptions of linear regression. We used Box Cox to test a variety of different transformations and saw that using the square root of charges (the response variable) helped us get closer to meeting the assumptions (although a few were still unmet). Because a few assumptions were not met, we cannot be sure our analysis is accurate. However, we proceeded to create interpretations and test model evaluation metrics as if the assumptions were met.
+
+# Methods and Results
+
+```{r}
+insurance <- read.csv("/Users/fostertruman/Downloads/insurance.csv", head = TRUE, stringsAsFactors = TRUE)
+insurance$children <- as.factor(insurance$children)
+summary(insurance)
+```
+
+When looking at our summary, things look pretty good. There are an almost equal amount of males and females and an almost equal amount of people from each of the four regions. The rest of our variables look to follow normal trends, so we don't see anything suspect here.
+
+### Scatterplots
+```{r, echo = FALSE, fig.align='center'}
+#Scatterplot for BMI, with Color Depending on Smoker
+ggplot(data = insurance, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("BMI (kg/m^s)") + labs(color = "Smoker") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges by BMI") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+#Scatterplot for Age, with Color Depending on Smoker
+ggplot(data = insurance, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age (Years)") + labs(color = "Smoker") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges by Age") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+```
+
+When looking at all of our different scatterplots for the continuous predictors, we thought it would be important to incorporate the predictor variables as color, specifically because we suspected an interaction between BMI and smoker. While we didn't see any significant patterns when using sex or region as the colors, we noticed that smokers does reveal a significant pattern when used as a color. On the scatterplots for BMI and age, smokers all have higher average medical expenses than non-smokers. Furthermore, there does appear to be an interaction between smokers and BMI. It would also appear that as a general guideline, as age and BMI increase, so does the annual amount of money spent on medical expenses (meaning there is a positive correlation between both age and charges and BMI and charges).
+
+### Boxplots
+```{r, echo = FALSE, fig.align='center'}
+#Boxplot for Smokers
+ggplot(data = insurance, mapping = aes(x = smoker, y = charges)) +
+  geom_boxplot() +
+  theme_bw() + xlab("Smoker or Non-Smoker") + ylab("Annual Medical Expense ($)") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Expense by Smoking Habits") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+#Boxplot for Sex
+ggplot(data = insurance, mapping = aes(x = sex, y = charges)) +
+  geom_boxplot() +
+  theme_bw() + xlab("Sex") + ylab("Annual Medical Expense ($)") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Expense by Sex") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+#Boxplot for Region
+ggplot(data = insurance, mapping = aes(x = region, y = charges)) +
+  geom_boxplot() +
+  theme_bw() + xlab("Region") + ylab("Annual Medical Expense ($)") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = 10),
+        aspect.ratio = 1) + ggtitle("Annual Medical Expense by Region") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+#Boxplot for Children
+ggplot(data = insurance, mapping = aes(x = children, y = charges)) +
+  geom_boxplot() +
+  theme_bw() + xlab("Number of Children") + ylab("Annual Medical Expense ($)") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Expense by No. Children") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+```
+
+When looking at our boxplots, we saw that there wasn't really any major differences between the average medical charge for any of the regions or depending on the number of children that one has. We did see a slight increase for males compared to females, but by far the largest difference was between smokers and non-smokers.
+
+### Correlation
+```{r, fig.align='center'}
+#Creating a data frame from only the continuous predictors
+insurance.cor <- NULL
+insurance.cor$age <- insurance$age
+insurance.cor$bmi <- insurance$bmi
+insurance.cor$charges <- insurance$charges
+insurance.cor <- as.data.frame(insurance.cor)
+
+#Creating a correlation matrix
+corrplot(cor(insurance.cor), type = "upper")
+```
+
+Looking at the correlation plot for our continuous predictors, we see that there don't seem to be any multicollinearity problems between our three continuous predictors. We do seem that age seems to be more positively correlated with the average annual medical expenses than the other continuous predictor, BMI.
+
+### Variable Selection Procedures
+```{r, fig.align='center'}
+#Best Subsets
+best.subsets.bic <- bestglm(insurance,
+                            IC = "BIC",
+                            method = "exhaustive",
+                            TopModels = 10)
+
+best.subsets.bic.df <- data.frame("num.vars" = 1:dim(insurance)[2], 
+                                  "BIC" = best.subsets.bic$Subsets$BIC)
+
+ggplot(data = best.subsets.bic.df, mapping = aes(x = num.vars, y = BIC)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_point(x = which.min(best.subsets.bic.df$BIC),
+             y = min(best.subsets.bic.df$BIC),
+             color = "red",
+             size = 3) +
+  theme_bw() +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text.x = element_text(size = sz),
+        axis.text.y = element_text(size = sz),
+        aspect.ratio = 1) + xlab("Number of Variables") + ggtitle("Best Subsets Method - BIC") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+summary(best.subsets.bic$BestModel)
+```
+
+When choosing which variables we were going to include in our model, we actually used all of the different methods (LASSO, elastic net, best subsets, sequential replacement) to find the best model. Using all of those methods, we actually came to the exact same model every time: one that includes age, BMI, and whether or not an individual is a smoker. Because all of the models came out to be the same, we just displayed the graph and model we got using BIC and the best subsets method.
+
+```{r, include = FALSE}
+#LASSO
+insurance.x <- model.matrix( ~ bmi + sex + age + smoker + region + children, insurance)
+insurance.y <- insurance[, 7]
+
+insurance.lasso <- glmnet(x = insurance.x, y = insurance[,7], alpha = 0)
+
+insurance.lasso.cv <- cv.glmnet(x = insurance.x, y = insurance.y, 
+                          type.measure = "mse", alpha = 1)
+
+insurance.lasso.cv$lambda.min
+insurance.lasso.cv$lambda.1se
+
+coef(insurance.lasso.cv, s = "lambda.min")
+coef(insurance.lasso.cv, s = "lambda.1se")
+
+#ELASTIC NET
+insurance.elast <- glmnet(x = insurance.x, y = insurance.y, alpha = .5)
+
+insurance.elast.cv <- cv.glmnet(x = insurance.x, y = insurance.y, 
+                          type.measure = "mse", alpha = .5)
+
+insurance.elast.cv$lambda.min
+insurance.elast.cv$lambda.1se
+
+coef(insurance.elast.cv, s = "lambda.min")
+coef(insurance.elast.cv, s = "lambda.1se")
+
+#Stepwise/Sequential Replacement
+stepwise.bic <- bestglm(insurance,
+                            IC = "BIC",
+                            method = "seqrep",
+                            TopModels = 1)
+
+stepwise.bic.df <- data.frame("num.vars" = 1:dim(insurance)[2], 
+                                  "BIC" = stepwise.bic$Subsets$BIC)
+
+ggplot(data = stepwise.bic.df, mapping = aes(x = num.vars, y = BIC)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_point(x = which.min(stepwise.bic.df$BIC),
+             y = min(stepwise.bic.df$BIC),
+             color = "red",
+             size = 3) +
+  theme_bw() +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text.x = element_text(size = sz),
+        axis.text.y = element_text(size = sz),
+        aspect.ratio = 1) + xlab("Number of Variables") + 
+  ggtitle("Sequential/Stepwise Method - PMSE") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+summary(stepwise.bic$BestModel)
+```
+
+
+### Testing Multiple Linear Regression Assumptions
+*1. The X's vs Y are linear.*
+```{r, fig.align='center'}
+insurance.lm.1 <- lm(charges ~ age + bmi + smoker, data = insurance)
+insurance$residuals <- insurance.lm.1$residuals
+insurance$fitted <- insurance.lm.1$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted <- autoplot(insurance.lm.1, which = 1, ncol = 1, nrow = 1)
+residuals.fitted
+
+#Partial Regression Plots
+avPlots(insurance.lm.1)
+
+#Residual v. Predictor Plots
+ggplot(data = insurance, mapping = aes(x = bmi, y = residuals)) +
+  geom_point() + theme_bw() + theme(aspect.ratio = 1) + 
+  geom_smooth(method = "lm", se = FALSE) + xlab("BMI (kg/m^s)") +
+  ylab("Residuals") + ggtitle("BMI v. Residuals Plot") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data = insurance, mapping = aes(x = age, y = residuals)) +
+  geom_point() + theme_bw() + theme(aspect.ratio = 1) + 
+  geom_smooth(method = "lm", se = FALSE) + xlab("Age (Years)") +
+  ylab("Residuals") + ggtitle("Age v. Residuals Plot") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+We would say that the linearity assumption for our model is not met. When looking at our residuals v. fitted plot, we see that the fit line is not straight at all and has a distinct pattern, lending to the belief that linearity assumption is not met. Our partial regression plots have straight lines, but their distributions are all over the place, again indicating a lack of linearity. Finally, the spread on the predictor vs residual plots is not random and scattered. For these reasons, we would say the assumption is not met.
+
+*2. The residuals are independent.*
+
+We would say that this assumption is met because a) the individuals were all randomly sampled and b) each individual was only sampled once.
+ 
+*3. The residuals are normally distributed and centered at zero.*
+```{r, include = FALSE}
+#Boxplot
+insurance.box <- ggplot(data = insurance, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+insurance.box
+```
+
+```{r, fig.align='center'}
+#Normal Probability Plot
+insurance.normal.prob <- autoplot(insurance.lm.1, which = 2, ncol = 1, nrow = 1) 
+insurance.normal.prob
+
+#Histogram
+insurance.histogram <- ggplot(data = insurance, mapping = aes(x = charges)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 5000) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance$residuals), 
+                            sd = sd(insurance$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+insurance.histogram
+```
+
+We would say that the normality assumption is not met because a) the boxplot is extremely right skewed, with lots of outliers to the right of zero, b) the right tail of the normal probability plot curves upwards of the fit line, indicating a lack of normality and c) the histogram (not shown here for brevity's sake) mirrors the boxplot with a heavy right skew.
+
+*4. The residuals have constant variance across all values of the X's.*
+```{r, include = FALSE, fig.align='center'}
+residuals.fitted
+```
+
+We would say that the assumption of equal variance (homoscedasticity) is not met because the spread of the residuals is not equal across the residuals vs. fitted plot (see above). In some places the residuals have a very small spread and in some places the residuals have a very large spread, meaning that this assumption is not met.
+
+*5. The model describes all observations (i.e., there are no influential points).*
+```{r, include = FALSE}
+insurance.dfbetas <- as.data.frame(dfbetas(insurance.lm.1))
+insurance.dfbetas$obs <- 1:length(insurance$charges)
+
+#DFBETAS for Age
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(age))) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = "dashed") +  # for n > 30
+  theme_bw() + theme(aspect.ratio = 1) + ggtitle("DFBETAS for Age") + 
+  xlab("Observations") + ylab("DFBETAS") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#age.extreme.dfbetas <- insurance.dfbetas[abs(insurance.dfbetas$age) > (2 / sqrt(length(insurance.dfbetas$obs))), ]
+#age.extreme.dfbetas[order(age.extreme.dfbetas$age), ]
+
+#DFBETAS for BMI
+ggplot(data = insurance.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(bmi))) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = "dashed") +  # for n > 30
+  theme_bw() + theme(aspect.ratio = 1) + ggtitle("DFBETAS for BMI") + 
+  xlab("Observations") + ylab("DFBETAS") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#bmi.extreme.dfbetas <- insurance.dfbetas[abs(insurance.dfbetas$bmi) > (2 / sqrt(length(insurance.dfbetas$obs))), ]
+#bmi.extreme.dfbetas[order(bmi.extreme.dfbetas$bmi), ]
+```
+
+```{r, fig.align='center'}
+#DFFITS
+insurance.dffits <- data.frame("dffits" = dffits(insurance.lm.1))
+insurance.dffits$obs <- 1:length(insurance$charges)
+
+ggplot(data = insurance.dffits) +
+  geom_point(mapping = aes(x = obs, y = abs(dffits))) +
+  geom_hline(mapping = aes(yintercept = 2 * sqrt(4 / length(obs))),
+             color = "red", linetype = "dashed") +
+  theme_bw() + ggtitle("DFFITS") + xlab("Observations") + ylab("DFFITS") +
+  theme(aspect.ratio = 1) + theme(plot.title = element_text(hjust = 0.5))
+
+#insurance.dffits[abs(insurance.dffits$dffits) > (2 * sqrt(4 / length(insurance$charges))), ]
+```
+
+```{r, include = FALSE}
+#Partial regression plots
+avPlots(insurance.lm.1)
+
+#Cook's Distance
+insurance$cooksd <- cooks.distance(insurance.lm.1)
+insurance[insurance$cooksd >= 4 / length(insurance$cooksd), ]
+```
+
+We would say that the assumption of no influential points is not met because a) the DFBETAS for both age and BMI (not pictured for brevity) have about 100 potential influential points each, b) the DFFITS has 129 potential influential points, c) the partial regression plots (pictured above) all indicate multiple potential influential points, and d) the Cook's distance table (not shown for brevity) shows 129 potential influential points. Although we'd have to perform further tests to know for sure if these points are influential or not, the fact that all of these tests point to a lot of influential points leads us to say the assumption is not met.
+
+*6. All important predictors are included. 7. No Multicollinearity.*
+```{r}
+#VIFs
+vif(insurance.lm.1)
+mean(vif(insurance.lm.1))
+
+#Correlation Plot
+corrplot(cor(insurance.cor), type = "upper")
+```
+
+We think that these the assumption of additional predictors is not met because many of our plots have patterns that indicate we are missing a predictor. Specifically, the residuals vs. fitted plot has a clump of points on the left that would indicate this. We do think that the no multicollinearity assumption is indeed met because a) the VIFs have an average of around one and a max of less than 10 and b) the correlation plot shows no risk of multicollinearity.
+
+### Transforming Our Model
+
+Because our model does not meet five of the seven linear regression assumptions, we are going to try and transform the model so that it will. We feel that it might not have an ideal transformation, as several of the plots have patterns that indicate that there is an additional predictor missing that we could use. We attempted transformations anyway. With Box-Cox, we got a lambda value of 0.1818, which doesn't correspond with an "ideal" transformation. Due to this, we tried a variety of transformations (log of the predictors, log of the response, log of both the predictors and response, square root of the predictors, square root of the response, and square root of both the predictors and response). After looking at all of transformations and how the assumptions worked with them, we saw that none of our transformations fixed the assumptions perfectly (meaning that our model is still imperfect). Regardless, we settled on the model with the square root of the response, as it helped our assumptions the most. Below, we tested two different interactions (BMI and smoker and smoker and age). When using ANOVA, we saw that both interactions were significant, so we included them in the model.
+
+``````{r, fig.align='center'}
+#Checking Box Cox
+bc <- boxCox(insurance.lm.1)
+bc$x[which.max(bc$y)]
+
+#Creating a Model with the Square Root of the Response
+insurance.sq <- insurance
+insurance.sq$charges <- sqrt(insurance.sq$charges)
+insurance.lm.sq <- lm(charges ~ age + bmi + smoker, data = insurance.sq)
+insurance.lm.sq2 <- lm(charges ~ age + bmi + smoker + bmi:smoker, data = insurance.sq)
+insurance.lm.sq3 <- lm(charges ~ age + bmi + smoker + bmi:smoker + smoker:age, data = insurance.sq)
+anova(insurance.lm.sq2, insurance.lm.sq3)
+
+insurance.lm.final <- insurance.lm.sq3
+```
+
+```{r, include = FALSE}
+#Testing Different Transformations
+#Log Y
+insurance.log <- insurance
+insurance.log$charges <- log(insurance.log$charges)
+insurance.lm.log <- lm(charges ~ age + bmi + + smoker, data = insurance.log)
+
+ggplot(data = insurance.log, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+ggplot(data = insurance.log, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("BMI") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+insurance.log$residuals <- insurance.lm.log$residuals
+insurance.log$fitted <- insurance.lm.log$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.log <- autoplot(insurance.lm.log, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.log
+
+#Partial Regression Plots
+avPlots(insurance.lm.log)
+
+ggplot(data = insurance.log, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Normal Probability Plot
+autoplot(insurance.lm.log, which = 2, ncol = 1, nrow = 1) 
+
+#Histogram
+ggplot(data = insurance.log, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 500) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.log$residuals), 
+                            sd = sd(insurance.log$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+```
+
+```{r, include = FALSE}
+#Log X
+insurance.logx <- insurance
+insurance.logx$age <- log(insurance$age)
+insurance.logx$bmi <- log(insurance$bmi)
+insurance.lm.logx <- lm(charges ~ age + bmi + smoker, data = insurance.logx)
+
+ggplot(data = insurance.logx, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+ggplot(data = insurance.logx, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("BMI") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+insurance.logx$residuals <- insurance.lm.logx$residuals
+insurance.logx$fitted <- insurance.lm.logx$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.logx <- autoplot(insurance.lm.logx, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.logx
+
+#Partial Regression Plots
+avPlots(insurance.lm.logx)
+
+ggplot(data = insurance.logx, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Normal Probability Plot
+autoplot(insurance.lm.logx, which = 2, ncol = 1, nrow = 1) 
+
+#Histogram
+ggplot(data = insurance.logx, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 500) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.logx$residuals), 
+                            sd = sd(insurance.logx$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+```
+
+```{r, include = FALSE}
+#Sqrt X
+insurance.sqx <- insurance
+insurance.sqx$age <- sqrt(insurance$age)
+insurance.sqx$bmi <- sqrt(insurance$bmi)
+insurance.lm.sqx <- lm(charges ~ age + bmi + smoker, data = insurance.sqx)
+
+ggplot(data = insurance.sqx, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+ggplot(data = insurance.sqx, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+insurance.sqx$residuals <- insurance.lm.sqx$residuals
+insurance.sqx$fitted <- insurance.lm.sqx$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.sqx <- autoplot(insurance.lm.sqx, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.sqx
+
+#Partial Regression Plots
+avPlots(insurance.lm.sqx)
+
+ggplot(data = insurance.sqx, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Normal Probability Plot
+autoplot(insurance.lm.sqx, which = 2, ncol = 1, nrow = 1) 
+
+
+#Histogram
+ggplot(data = insurance.sqx, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 500) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.sqx$residuals), 
+                            sd = sd(insurance.sqx$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+```
+
+```{r, include = FALSE}
+#Log Both
+insurance.logboth <- insurance
+insurance.logboth$charges <- log(insurance$charges)
+insurance.logboth$age <- log(insurance$age)
+insurance.logboth$bmi <- log(insurance$bmi)
+insurance.lm.logboth <- lm(charges ~ age + bmi + smoker, data = insurance.logboth)
+
+ggplot(data = insurance.logboth, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+ggplot(data = insurance.logboth, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("BMI") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+insurance.logboth$residuals <- insurance.lm.logboth$residuals
+insurance.logboth$fitted <- insurance.lm.logboth$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.logboth <- autoplot(insurance.lm.logboth, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.logboth
+
+#Partial Regression Plots
+avPlots(insurance.lm.logboth)
+
+ggplot(data = insurance.log, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Normal Probability Plot
+autoplot(insurance.lm.log, which = 2, ncol = 1, nrow = 1) 
+
+
+#Histogram
+ggplot(data = insurance.log, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 50) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.log$residuals), 
+                            sd = sd(insurance.log$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+```
+
+```{r, include = FALSE}
+#Sqrt Both
+insurance.both <- insurance
+insurance.both$charges <- sqrt(insurance.both$charges)
+insurance.both$age <- sqrt(insurance$age)
+insurance.both$bmi <- sqrt(insurance$bmi)
+insurance.lm.both <- lm(charges ~ age + bmi + smoker, data = insurance.both)
+
+ggplot(data = insurance.both, mapping = aes(x = age, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+ggplot(data = insurance.both, mapping = aes(x = bmi, y = charges, color = smoker)) +
+  geom_point() +
+  theme_bw() + ylab("Annual Medical Charges ($)") + 
+  xlab("Age") +
+  theme(axis.title.x = element_text(size = sz),
+        axis.title.y = element_text(size = sz),
+        axis.text = element_text(size = sz),
+        aspect.ratio = 1) + ggtitle("Annual Medical Charges") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+insurance.both$residuals <- insurance.lm.both$residuals
+insurance.both$fitted <- insurance.lm.both$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.both <- autoplot(insurance.lm.sqx, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.both
+
+#Partial Regression Plots
+avPlots(insurance.lm.both)
+
+ggplot(data = insurance.both, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Normal Probability Plot
+autoplot(insurance.lm.both, which = 2, ncol = 1, nrow = 1) 
+
+
+#Histogram
+ggplot(data = insurance.both, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 5) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.both$residuals), 
+                            sd = sd(insurance.both$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + theme(aspect.ratio = 1)
+```
+
+### Retesting Multiple Linear Regression Assumptions
+*1. The X's vs Y are linear.*
+```{r, fig.align='center'}
+insurance.sq$residuals <- insurance.lm.sq$residuals
+insurance.sq$fitted <- insurance.lm.sq$fitted.values
+
+#Residuals v. Fitted Values
+residuals.fitted.sq <- autoplot(insurance.lm.sq, which = 1, ncol = 1, nrow = 1)
+residuals.fitted.sq
+
+#Partial Regression Plots
+avPlots(insurance.lm.sq)
+
+#Residual v. Predictor Plots
+ggplot(data = insurance.sq, mapping = aes(x = bmi, y = residuals)) +
+  geom_point() + theme_bw() + theme(aspect.ratio = 1) + 
+  geom_smooth(method = "lm", se = FALSE) + xlab("BMI (kg/m^s)") +
+  ylab("Residuals") + ggtitle("BMI v. Residuals Plot") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data = insurance.sq, mapping = aes(x = age, y = residuals)) +
+  geom_point() + theme_bw() + theme(aspect.ratio = 1) + 
+  geom_smooth(method = "lm", se = FALSE) + xlab("Age (Years)") +
+  ylab("Residuals") + ggtitle("Age v. Residuals Plot") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Although the fitted line on the residuals vs. fitted plot and the partial regression plots have improved, we would still say that this assumption is not met as a) the residuals vs. fitted plot still has patterns and is not scattered and b) the residuals vs. predictors plots both have patterns and are not scattered.
+
+*2. The residuals are independent.*
+
+Again, we would say that this assumption is met because a) the individuals were randomly chosen and b) the individuals were only sampled once.
+ 
+*3. The residuals are normally distributed and centered at zero.*
+```{r, include = FALSE}
+#Boxplot
+ggplot(data = insurance.sq, mapping = aes(y = residuals)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Residuals") +
+  ggtitle("Boxplot of Residuals") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r, fig.align='center'}
+#Normal Probability Plot
+autoplot(insurance.lm.sq, which = 2, ncol = 1, nrow = 1) 
+
+#Histogram
+ggplot(data = insurance.sq, mapping = aes(x = residuals)) + 
+  geom_histogram(mapping = aes(y = ..density..), binwidth = 5) +
+  stat_function(fun = dnorm, color = "red", size = 2,
+                args = list(mean = mean(insurance.sq$residuals), 
+                            sd = sd(insurance.sq$residuals))) +
+  xlab("Residuals of Distance") + ylab("Density") + 
+  ggtitle ("Histogram of Residuals") + theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(aspect.ratio = 1)
+```
+
+This assumption has improved greatly, as the plots aren't as right skewed as before. That being said, the assumption is still not met because a) the boxplot and histogram and still right skewed (although not as heavily as before) and b) the normal probability plot skews off of the fit line.
+
+*4. The residuals have constant variance across all values of the X's.*
+```{r, include = FALSE, fig.align='center'}
+residuals.fitted.sq
+```
+
+This assumption is not met because the spread of the residuals is sporadic and not constant for all fitted values. At some points the spread is small and at others it is very large.
+
+*5. The model describes all observations (i.e., there are no influential points).*
+```{r, include = FALSE}
+insurance.sq.dfbetas <- as.data.frame(dfbetas(insurance.lm.sq))
+insurance.sq.dfbetas$obs <- 1:length(insurance$charges)
+
+#DFBETAS for Age
+ggplot(data = insurance.sq.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(age))) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = "dashed") +
+  theme_bw() + theme(aspect.ratio = 1) + ggtitle("DFBETAS for Age") + 
+  xlab("Observations") + ylab("DFBETAS") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#age.sq.extreme.dfbetas <- insurance.sq.dfbetas[abs(insurance.sq.dfbetas$age) > (2 / sqrt(length(insurance.sq.dfbetas$obs))), ]
+#age.sq.extreme.dfbetas[order(age.sq.extreme.dfbetas$age), ]
+
+#DFBETAS for BMI
+ggplot(data = insurance.sq.dfbetas) +
+  geom_point(mapping = aes(x = obs, y = abs(bmi))) +
+  geom_hline(mapping = aes(yintercept = 2 / sqrt(length(obs))),
+             color = "red", linetype = "dashed") +
+  theme_bw() + theme(aspect.ratio = 1) + ggtitle("DFBETAS for BMI") + 
+  xlab("Observations") + ylab("DFBETAS") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#bmi.sq.extreme.dfbetas <- insurance.sq.dfbetas[abs(insurance.sq.dfbetas$bmi) > (2 / sqrt(length(insurance.sq.dfbetas$obs))), ]
+#bmi.sq.extreme.dfbetas[order(bmi.sq.extreme.dfbetas$bmi), ]
+```
+
+```{r, fig.align='center'}
+#DFFITS
+insurance.sq.dffits <- data.frame("dffits" = dffits(insurance.lm.sq))
+insurance.sq.dffits$obs <- 1:length(insurance$charges)
+
+ggplot(data = insurance.sq.dffits) +
+  geom_point(mapping = aes(x = obs, y = abs(dffits))) +
+  geom_hline(mapping = aes(yintercept = 2 * sqrt(4 / length(obs))),
+             color = "red", linetype = "dashed") +
+  theme_bw() + ggtitle("DFFITS") + xlab("Observations") + ylab("DFFITS") +
+  theme(aspect.ratio = 1) + theme(plot.title = element_text(hjust = 0.5))
+
+#insurance.sq.dffits[abs(insurance.sq.dffits$dffits) > (2 * sqrt(4 / length(insurance$charges))), ]
+```
+
+```{r, include = FALSE}
+#Partial regression plots
+avPlots(insurance.lm.sq)
+
+#Cook's Distance
+insurance.sq$cooksd <- cooks.distance(insurance.lm.sq)
+insurance.sq[insurance.sq$cooksd >= 4 / length(insurance.sq$cooksd), ]
+```
+
+Our transformation improved much of these analyses, as the number of influential points decreases for all of the analyses. That being said, we would still say that the model does not meet this assumption due to the sheer amount of potential influential points found by DFFITS, DFBETAS, Cook's Distance, and the partial regression plots.
+
+*6. All important predictors are included. 7. No Multicollinearity.*
+```{r, fig.align='center'}
+vif(insurance.lm.sq)
+mean(vif(insurance.lm.sq))
+
+#Correlation Plot
+insurance.sq.cor <- NULL
+insurance.sq.cor$age <- insurance.sq$age
+insurance.sq.cor$bmi <- insurance.sq$bmi
+insurance.sq.cor$charges <- insurance.sq$charges
+insurance.sq.cor <- as.data.frame(insurance.sq.cor)
+corrplot(cor(insurance.sq.cor), type = "upper")
+```
+
+We would say that the assumption of additional predictors is not met because our plots all have patterns that would indicate we are missing a potential additional predictor. We would say that the no multicollinearity assumption is met because the average VIF is close to 1, the maximum VIF is under 10, and the correlation plot shows no reason to worry about multicollinearity.
+
+### Note on the Transformation
+
+Because our transformed model did not meet any of the assumptions, the model evaluation metrics and interpretations below cannot be considered accurate. That being said, we carried them out to comply with the requirements of the assignment.
+
+### Evaluating Accuracy of the Model
+
+```{r}
+#Calculating Mean Square Error
+MSE <- sum((insurance.sq$charges-insurance.sq$fitted)^2) / insurance.lm.final$df.residual
+c("Mean Square Error" = MSE)
+
+#Calculating Root Mean Square Error
+RMSE <- sqrt(MSE)
+c("Root Mean Square Error" = RMSE)
+
+#Calculating Mean Absolute Error
+MAE <- sum(abs(insurance.sq$charges-insurance.sq$fitted))/insurance.lm.final$df.residual
+c("Mean Absolute Error" = MAE)
+
+#R-Squared
+c("R-Squared" = summary(insurance.lm.final)$r.squared)
+
+#Adjusted R-Squared
+c("Adjusted R-Squared" = summary(insurance.lm.final)$adj.r.squared)
+```
+
+Had the model met the assumptions of linear regression, these metrics would be extremely helpful in determining the accuracy of the model. We will interpret them as if the model *did* fit the assumptions. 
+
+The MSE estimates the true error variances by finding the average square distance between the observed outcome and the predicted outcome from the model. The RMSE is just the square root of the MSE. The MAE is the mean absolute error and is better than the RMSE in that it is less susceptible to outliers. The MSE, RMSE, and MAE are all pretty high in this case (which is most likely due to the large number of outliers). Our R-Squared of 0.824 means that about 82.4% of variation in our response variable (the average annual medical expense) is explained by our predictor variables (age, bmi, whether or not someone is a smoker, and interaction terms between age and smoker and BMI and smoker). This means our model does a fairly good job of predicting the average annual medical expenses for an individual. The adjusted R-Squared of 0.823 means that 82.3% of variation in our response variable (the average annual medical expense) is explained by our predictor variables (age, bmi, whether or not someone is a smoker, and interaction terms between age and smoker and BMI and smoker) when adjusted for the number of variables. This would again indicate that our model is doing a good job.
+
+### Interpretation and Confidence Intervals
+
+Again, because our model did not meet the assumptions of linear regression, these interpretations would have been accurate. We will still interpret as if the model *did* fit the assumptions. 
+
+##### Hypothesis Test for the Slope
+```{r}
+summary(insurance.lm.final)
+```
+
+Because the F-statistic is very large and the p-value for our model is extremely small, we would say that we reject the null hypothesis and say that at least one of these predictors is significant (helpful) when predicting the average annual medical expenses (at least one of the coefficients is non-zero).
+
+##### Interpreting Coefficients
+```{r}
+insurance.lm.final$coefficients
+```
+
+*Charges Intercept:*
+For individuals that are 0 years old, have a BMI of 0 kg/m^s, and are not smokers, the square root of the annual medical expense will be $22.91, on average.
+
+*Age:*
+Holding all else constant and assuming that the individual is not a smoker, as age increases by 1 year, the square root of the annual medical expense will increase by 1.608 dollars, on average. If the individual is a smoker, holding all else constant, as age increases by 1 year, the square root of the annual medical expense will increase by 0.763 dollars, on average.
+
+*BMI:*
+Holding all else constant and assuming that the individual is not a smoker, as BMI increases by 1 kg/m^s, the square root of the annual medical expense will increase by 0.009 dollars, on average. If the individual is a smoker, holding all else constant, as BMI increases by 1 kg/m^s, the square root of the annual medical expense will increase by 4.12 dollars, on average.
+
+*Smoker:*
+The effect of smoking is very dependent on the BMI and age of a person. Let's take an individual that is 50 years old and has a BMI of 39 kg/m^s, for example. If that individual is a smoker, the increase to the square root of the annual medical expense is 115.267 dollars larger than for a non-smoker. For a younger person (20 years old) with a smaller BMI (25 kg/m^s), the increase is only 82.99 dollars over a non-smoker. This demonstrates that the effect of smoking very much depends on the age and the BMI of the individual. The older they are and the higher the BMI, the effect of smoking will be larger on the average annual medical expense.
+
+##### Confidence Intervals for Coefficients
+```{r}
+confint(insurance.lm.final)
+```
+
+Ideally, we would be able to interpret all of the confidence intervals for our results. However, because all of our predictors are affected by interaction, this can be rather tricky and is past the scope of this class. We will interpret the intercept and the age confidence intervals as if they were not affected by interaction. These interpretations are purely illustrative.
+
+*Charges Intercept:*
+We are 95% confident that the square root of the average annual medical expense will be between 16.13 and 29.69 for non-smokers that are 0 years old and have a BMI of 0 kg/m^s.
+
+*Age:*
+We are 95% confident, that holding all else constant, the square root of the average annual medical expense for an individual will increase by between 1.52 and 1.69 as age increases by 1 year.
+
+##### Confidence Intervals for Predicted Value of a Response
+```{r}
+predict(insurance.lm.final, newdata = data.frame(age = 23, bmi = 27.1, smoker = "no"), interval = "confidence", level = 0.95)
+```
+
+Using our model, we are going to predict the square root of the average annual medical expenses for people like Foster (23 years old, BMI of 27.1 kg/m^s, and non-smokers).
+
+We are 95% confident that the square root of the average annual medical expenses will be between 58.21 dollars and 60.14 dollars when age is 23 years old, BMI is 27.1 kg/m^s, and smoker status is no.
+
+##### Prediction Intervals for Predicted Value of a Response
+```{r}
+predict(insurance.lm.final, newdata = data.frame(age = 23, bmi = 27.1, smoker = "no"), interval = "predict", level = 0.95)
+```
+
+Now, we are going to predict the square root of the annual medical expenses for *one individual* like Foster (23 years old, BMI of 27.1 kg/m^s, and non-smokers).
+
+We are 95% confident that the square root of the annual medical expenses will be between 20.71 dollars and 99.57 dollars for one individual who is 23 years old, whose BMI is 27.1 kg/m^s, and whose smoker status is no. This prediction interval is larger than our previous confidence interval because it is predicting for one individual rather than a population.
+
+# Summary and Conclusions
+Because our model does not meet the assumptions for multiple linear regression, we find it very difficult to make any strong recommendations to insurance companies based on our results. That being said, we would recommend that the insurance companies collect more data to see if they are missing another valuable predictor to predict average annual medical expense. If the insurance companies can find this predictor, they might be able to create a model that meets all of the multiple linear regression assumptions.
+
+The above being said, we would still like to interpret our model as if the assumptions were met. We originally started with six predictors: age, BMI, sex, smoker status, region, and number of children. Using variable selection methods, we saw that three of those predictors (sex, region, and number of children) were not helpful in predicting the average medical expense. Our hypothesis that number of children is significant was incorrect. We saw that age, BMI, and smoker status, however, did help us predict the average annual medical expense. We saw that the average annual medical expenses always increased as age increased, but that they increased more non-smokers than for smokers as age increased. We saw that the average annual medical expenses always increased as BMI increased, but that they increased more for smokers than for non-smokers as BMI increased. And finally, we saw that typically, the average annual medical expenses typically increased for smokers as compared to non-smokers.
